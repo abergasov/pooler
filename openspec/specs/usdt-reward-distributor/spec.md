@@ -1,0 +1,522 @@
+# USDT Reward Distributor Specification
+
+## Purpose
+
+Define an owner-controlled USDT distributor that pays configured participant
+shares and a fixed-rate fee atomically, including deterministic rounding and
+full-balance recovery under an explicitly trusted owner. Provide operator commands
+to deploy, inspect, and manage independent instances without duplicating their
+live configuration locally.
+
+## Requirements
+
+### Requirement: Independent and fixed deployment configuration
+
+Each deployment SHALL operate independently on its selected Ethereum or Arbitrum
+network with exactly one configured USDT token address. Deployment SHALL set the
+initial owner, fee wallet, fee rate, and valid initial recipient list. The token
+address and fee rate SHALL be immutable, and the contract SHALL expose no logic
+upgrade mechanism. Only ownership, the fee wallet, and the full recipient list
+with its shares SHALL be mutable configuration.
+
+The supported production deployments SHALL use the following network/token pairs.
+Both tokens have six decimal places; all allocation arithmetic SHALL continue to
+use integer base units.
+
+| Network | Chain ID | Token | Token contract |
+| --- | --- | --- | --- |
+| Ethereum mainnet | 1 | USD₮ (USDT) | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
+| Arbitrum One | 42161 | USD₮0 (USDT0) | `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` |
+
+In this specification, "USDT" refers to the selected network's token above; it
+does not imply that both networks use identical token implementations.
+
+#### Scenario: Valid deployment
+- **WHEN** the contract is deployed with valid initial configuration
+- **THEN** it is ready to receive USDT and execute owner-authorized operations
+- **AND** it requires no subsequent initialization to establish a valid list
+
+#### Scenario: Independent deployments
+- **WHEN** USDT is funded or configuration is changed in one deployment
+- **THEN** balances and configuration in other deployments are unaffected
+
+#### Scenario: Immutable configuration
+- **WHEN** an owner wants a different USDT token, fee rate, or contract logic
+- **THEN** the existing deployment offers no operation to make that change
+
+### Requirement: Percentage precision and fee bounds
+
+All percentage inputs SHALL use integer basis points: one basis point is 0.01%,
+and 10000 basis points is 100%. The fee rate SHALL be between 0 and 9999 basis
+points inclusive. Token amounts SHALL use the configured token's smallest unit;
+percentage precision SHALL NOT restrict amounts to two decimal places.
+
+#### Scenario: Percentage representation
+- **WHEN** a recipient is assigned 12.30%
+- **THEN** its share input is 1230 basis points
+
+#### Scenario: Fee bounds
+- **WHEN** a deployment supplies a fee rate of 0 or 9999 basis points
+- **THEN** the fee rate is accepted if the other configuration is valid
+- **WHEN** a deployment supplies a fee rate of 10000 or greater
+- **THEN** deployment reverts
+
+### Requirement: Valid complete recipient lists
+
+Recipients SHALL be supplied as a list of address/share pairs containing 1–100
+entries. Addresses SHALL be unique, nonzero, and different from the distributor
+address. Each share SHALL be positive and the total SHALL equal exactly 10000
+basis points. These checks SHALL apply both at deployment and on replacement.
+An owner or fee wallet SHALL be allowed to also appear once as a recipient.
+
+#### Scenario: Valid list
+- **WHEN** a list contains three distinct valid addresses with shares 1000, 2000,
+  and 7000 basis points
+- **THEN** the list is accepted
+
+#### Scenario: Invalid share total
+- **WHEN** a proposed list totals less than or more than 10000 basis points
+- **THEN** the configuration operation reverts without installing the list
+
+#### Scenario: Invalid entries
+- **WHEN** a proposed list contains a duplicate address, a zero address, the
+  distributor address, or a zero share
+- **THEN** the configuration operation reverts without installing the list
+
+#### Scenario: Recipient count boundaries
+- **WHEN** an otherwise valid list contains exactly 100 recipients
+- **THEN** the list is accepted
+- **WHEN** a list is empty or contains more than 100 recipients
+- **THEN** the configuration operation reverts
+
+### Requirement: Atomic recipient replacement
+
+Only the current owner SHALL be able to replace the recipient list. Replacement
+SHALL validate the entire proposed list before changing the active configuration
+and SHALL replace all previous entries. A rejected replacement SHALL leave the
+previous configuration unchanged. Funds already present SHALL be distributed
+using the configuration active when distribution is invoked.
+
+#### Scenario: Previously funded balance uses the new list
+- **GIVEN** the contract holds USDT funded while an old list was active
+- **WHEN** the owner installs a valid new list and then calls `distribute()`
+- **THEN** all participant payouts use the new list and its shares
+- **AND** removed recipients receive no payout under their old entries
+
+#### Scenario: Failed replacement preserves the old list
+- **WHEN** the owner submits an invalid replacement
+- **THEN** the operation reverts
+- **AND** subsequent distribution still uses the complete previous list
+
+### Requirement: Owner authorization and immediate ownership transfer
+
+Only the current owner SHALL be able to distribute, withdraw the full balance,
+replace recipients, change the fee wallet, or change ownership. The initial owner
+SHALL be an explicit deployment parameter, not necessarily the deployer. Ownership
+transfer SHALL take effect in one successful call by the current owner, without
+acceptance by the new owner. New owner addresses SHALL be nonzero and different
+from the distributor address; no ownership renunciation operation SHALL exist.
+
+#### Scenario: Unauthorized operation
+- **WHEN** a caller other than the current owner attempts any privileged operation
+- **THEN** the operation reverts with an authorization error
+- **AND** configuration and token balances remain unchanged by that operation
+
+#### Scenario: Immediate transfer
+- **WHEN** the current owner appoints a valid new owner
+- **THEN** the new owner immediately has all owner permissions
+- **AND** the previous owner loses those permissions without a second transaction
+- **AND** the fee wallet and recipient list remain unchanged
+
+#### Scenario: Invalid owner address
+- **WHEN** deployment or ownership transfer specifies the zero address or the
+  distributor address as owner
+- **THEN** the operation reverts without changing ownership
+
+### Requirement: Independent fee wallet
+
+The owner SHALL be able to set the fee wallet independently of ownership and the
+recipient list. The fee wallet SHALL be nonzero and different from the distributor
+address. It SHALL be allowed to equal the owner or a participant address. Updating
+it SHALL NOT change the fee rate. Ownership transfer SHALL NOT update it implicitly.
+
+#### Scenario: Redirect fees
+- **WHEN** the owner replaces the fee wallet with a valid address
+- **THEN** the next distribution sends the fee and rounding residue to that address
+- **AND** this applies to the full balance, including funds received before the change
+
+#### Scenario: Invalid fee destination
+- **WHEN** deployment or a fee-wallet update specifies the zero address or the
+  distributor address as fee wallet
+- **THEN** the operation reverts and any previous fee wallet remains unchanged
+
+### Requirement: Funding and explicit full-balance distribution
+
+Ordinary USDT transfers to the distributor SHALL fund its balance without starting
+distribution. An owner call to `distribute()` SHALL allocate the entire current
+USDT balance using the current recipient list and fee wallet. Multiple incoming
+transfers SHALL be treated as one balance, without depositor-specific entitlements,
+deposit snapshots, or participant claims.
+
+#### Scenario: Funding does not pay recipients
+- **WHEN** someone transfers USDT to the distributor without calling `distribute()`
+- **THEN** the received USDT remains in the distributor until an owner operation
+
+#### Scenario: Multiple deposits
+- **GIVEN** 40 USDT and 60 USDT have been transferred to the distributor
+- **WHEN** the owner calls `distribute()` with no other balance changes
+- **THEN** allocation is calculated from the combined 100 USDT
+
+### Requirement: Deterministic allocation and zero remaining balance
+
+For balance B in token base units, fee rate f in basis points, and recipient shares
+s_i, distribution SHALL produce these exact amounts:
+
+- Base fee F = floor(B * f / 10000).
+- Participant pool D = B - F.
+- Each participant payout P_i = floor(D * s_i / 10000).
+- Fee-wallet payout C = B - sum(P_i).
+
+C SHALL include F and all participant-rounding residue. Successful distribution
+SHALL transfer all P_i and C to their configured destinations and leave the
+distributor with zero USDT. Zero-valued transfers SHALL be skipped. Residue SHALL
+NOT be reserved on the contract or attributed to a future distribution. When a
+fee wallet is also a participant, its total receipt SHALL include both amounts.
+
+#### Scenario: Exact standard allocation
+- **GIVEN** B is 100 USDT, f is 500 basis points, and recipient shares are 1000,
+  2000, and 7000 basis points
+- **WHEN** distribution succeeds
+- **THEN** the recipients receive 9.5, 19, and 66.5 USDT respectively
+- **AND** the fee wallet receives 5 USDT and the distributor balance is zero
+
+#### Scenario: Fractional residue goes to the fee wallet
+- **GIVEN** B is 100000001 base units, f is 500, and shares are 1000, 2000, and 7000
+- **WHEN** distribution succeeds
+- **THEN** F is 5000000 and D is 95000001 base units
+- **AND** participant payouts are 9500000, 19000000, and 66500000 base units
+- **AND** the fee wallet receives 5000001 base units and the balance is zero
+
+#### Scenario: Tiny balance and zero-valued payouts
+- **GIVEN** B is 7 base units, f is 500, and shares are 1000, 2000, and 7000
+- **WHEN** distribution succeeds
+- **THEN** participant payouts are 0, 1, and 4 base units, with no transfer for zero
+- **AND** the fee wallet receives the remaining 2 base units
+- **AND** the distributor balance is zero even though the base fee rounds to zero
+
+#### Scenario: Zero fee still assigns residue
+- **GIVEN** B is 1 base unit, f is 0, and two recipients each have 5000 basis points
+- **WHEN** distribution succeeds
+- **THEN** both participant payouts round to zero
+- **AND** the fee wallet receives the 1 base unit of residue
+
+### Requirement: Atomic and protected transfers
+
+If any required participant or fee-wallet transfer fails, the entire distribution
+SHALL revert, including earlier transfers in that transaction. A token-reported
+failure SHALL NOT be treated as a successful transfer. Calls made during token
+interactions SHALL NOT permit duplicate spending or configuration changes that
+alter the operation's allocation. Withdrawal SHALL likewise revert if its transfer
+fails. No failed operation SHALL leave partial payouts or configuration changes.
+
+#### Scenario: Participant transfer failure
+- **WHEN** any participant transfer fails after earlier transfers were attempted
+- **THEN** every transfer in that distribution is rolled back
+- **AND** the distributor and destination balances match their pre-call values
+
+#### Scenario: Fee transfer failure
+- **WHEN** the fee-wallet transfer fails
+- **THEN** participant payouts are also rolled back
+
+#### Scenario: Reentrant interaction
+- **WHEN** a token interaction attempts a nested payout, withdrawal, or mutation
+  that would alter the active operation
+- **THEN** it cannot spend the balance twice or change the active allocation
+- **AND** the outer operation either satisfies its full invariants or reverts
+
+### Requirement: Unconditional owner withdrawal of all USDT
+
+The owner SHALL be able to withdraw the entire current USDT balance to a chosen
+nonzero destination other than the distributor address at any time. This operation
+SHALL bypass participant allocation and fees and SHALL NOT require a previous
+distribution failure. Success SHALL leave zero USDT and preserve configuration.
+
+#### Scenario: Withdrawal without prior failure
+- **GIVEN** the distributor holds 100 USDT and no distribution has failed
+- **WHEN** the owner requests full withdrawal to a valid destination
+- **THEN** the destination receives 100 USDT, no participant or fee payout occurs,
+  and the distributor balance becomes zero
+
+#### Scenario: Recovery after a failed distribution
+- **GIVEN** distribution reverted because a participant could not receive USDT
+- **WHEN** the owner withdraws to another destination that can receive USDT
+- **THEN** the full balance is transferred without participant allocation
+
+#### Scenario: Invalid or failing withdrawal
+- **WHEN** the destination is the zero address or the distributor itself, or the
+  required USDT transfer fails
+- **THEN** withdrawal reverts without transferring any funds
+
+### Requirement: Explicit empty-balance errors
+
+Both `distribute()` and full-balance withdrawal SHALL revert with an identifiable
+empty-balance error when the configured USDT balance is zero. Neither SHALL issue
+token transfers in that case.
+
+#### Scenario: No funds available
+- **WHEN** the owner calls either payout operation with a zero USDT balance
+- **THEN** the call reverts with an empty-balance error and no transfer occurs
+
+#### Scenario: Repeated distribution
+- **GIVEN** a previous distribution succeeded and no additional USDT has arrived
+- **WHEN** the owner calls `distribute()` again
+- **THEN** the call reverts with an empty-balance error
+
+### Requirement: Full-size atomic distribution
+
+The implementation SHALL support a valid list of 100 recipients in a single atomic
+distribution on the selected deployment network. Deployment readiness SHALL include
+a measured gas check using representative worst-case token transfers. If this check
+fails, the implementation SHALL NOT silently lower the limit or split payouts across
+transactions; the requirement SHALL be revisited before release.
+
+#### Scenario: Maximum-size distribution
+- **GIVEN** a valid 100-recipient list and sufficient USDT for every payout to be nonzero
+- **WHEN** the owner distributes under the selected network's transaction limits
+- **THEN** all payouts and the fee complete in one transaction with zero remaining USDT
+- **AND** recorded validation demonstrates that execution fits those limits
+
+### Requirement: Public configuration inspection
+
+The contract SHALL expose public read-only methods returning the complete current
+recipient address/share list, owner, fee wallet, fee rate, and USDT token address.
+The `show` command SHALL read these values and the current USDT balance from the
+selected network, displaying percentages at their agreed precision. Reading SHALL
+NOT require the owner's private key, a transaction, or successful explorer
+verification. Local input files SHALL NOT substitute for current on-chain state.
+
+#### Scenario: Inspect a changed contract
+- **GIVEN** the owner changed recipients through a different client
+- **WHEN** an operator runs `make show` for that contract
+- **THEN** the command displays the current on-chain list and configuration
+- **AND** it works without a configured private key or verified explorer source
+
+### Requirement: Makefile command interface and defaults
+
+Operator tooling and auxiliary actions SHALL be implemented in Go. Operator
+commands SHALL be exposed through Makefile targets
+`deploy`, `set-distribution`, `show`, `distribute`, `distribute-all`, and `verify`.
+The top of the Makefile SHALL define overridable defaults `NETWORK ?= arbitrum`
+and `INPUT ?= input.json`. Invocation-supplied values SHALL override those defaults.
+`INPUT` SHALL only be required for deployment and recipient replacement; the
+other commands SHALL work without an input file. Network selection SHALL apply
+consistently to RPC calls, signing, registry filtering, and explorer verification.
+
+#### Scenario: Use defaults
+- **WHEN** the operator runs `make deploy` without variable overrides
+- **THEN** it selects Arbitrum and reads deployment parameters from `input.json`
+
+#### Scenario: Override defaults
+- **WHEN** the operator runs `make deploy NETWORK=ethereum INPUT=other.json`
+- **THEN** it uses Ethereum and `other.json` without editing the Makefile
+
+#### Scenario: Input-independent operation
+- **WHEN** the operator runs `make distribute CONTRACT=<address>` with no input file
+- **THEN** missing `input.json` does not prevent distribution on the selected network
+
+### Requirement: Minimal network-scoped contract registry
+
+`contracts.json` SHALL store a JSON list of entries with separate `name`,
+`description`, `network`, and `address` fields. Names SHALL support spaces and long
+human-readable labels and SHALL NOT be used as transaction identifiers. Contract
+identity SHALL be the selected network plus address; duplicate entries for that
+identity SHALL be rejected. Identical names and addresses on different networks
+SHALL remain distinguishable. The registry SHALL NOT store private keys or serve
+as a persisted copy of shares, fee rates, or other live contract configuration.
+
+#### Scenario: Same address on different networks
+- **GIVEN** entries have the same address on Ethereum and Arbitrum
+- **WHEN** the operator selects Arbitrum
+- **THEN** only the Arbitrum entry is eligible for selection or batch distribution
+
+#### Scenario: Human-readable names
+- **WHEN** two entries have the same long name containing spaces
+- **THEN** both can be displayed and distinguished by network and address
+- **AND** no slug derived from the name determines the transaction destination
+
+#### Scenario: Invalid registry
+- **WHEN** a command requiring the registry encounters malformed entries or a
+  duplicate network/address pair
+- **THEN** it reports a validation error before sending transactions
+
+### Requirement: Interactive or explicit contract selection
+
+Single-contract commands SHALL accept `CONTRACT=<address>` to bypass selection.
+Without that argument in an interactive terminal, they SHALL display the known
+contracts for the selected network, showing name, description, and address, and
+allow selection of exactly one contract with arrow keys and Enter. Cancelling
+SHALL send no transaction. Without an interactive terminal and without an explicit
+address, the command SHALL fail with instructions to supply `CONTRACT`; it SHALL
+NOT hang or silently select the first entry. An explicit valid contract address
+SHALL be usable without registration on the selected network.
+
+#### Scenario: Select a contract interactively
+- **WHEN** the operator runs `make distribute` in an interactive terminal
+- **THEN** a network-filtered contract menu appears
+- **AND** confirming an entry targets only that contract for distribution
+
+#### Scenario: Explicit address
+- **WHEN** the operator runs `make distribute CONTRACT=<address>`
+- **THEN** the command targets that address on the effective network without a menu
+
+#### Scenario: No eligible selection
+- **WHEN** no known contracts exist on the selected network and no address is supplied
+- **THEN** the command explains that no contract is available and sends no transaction
+
+#### Scenario: Noninteractive invocation
+- **WHEN** a single-contract command has neither a terminal nor `CONTRACT`
+- **THEN** it fails promptly with an actionable error and sends no transaction
+
+### Requirement: Operation input and preflight validation
+
+Deployment SHALL read the initial contract parameters and registry name/description
+from the JSON file selected by `INPUT`. Recipient replacement SHALL read the full
+proposed address/share list from `INPUT` and change only that list. Shares and fee
+rates SHALL use integer basis points. Files SHALL be operation inputs, not a
+required per-pool configuration store. Before sending a transaction, the CLI SHALL
+validate the relevant inputs, selected network and RPC chain identity, destination,
+and signing configuration. Existing-contract mutations SHALL verify that the signer
+matches the current on-chain owner. Invalid input SHALL NOT change chain state or
+registry entries. A successful recipient replacement SHALL be confirmed on-chain.
+
+#### Scenario: Change distribution from input
+- **WHEN** the operator runs `make set-distribution INPUT=new-shares.json` and
+  selects a contract
+- **THEN** the complete validated recipient list is submitted to that contract
+- **AND** its immutable fee rate and other configuration remain unchanged
+
+#### Scenario: Wrong network or owner
+- **WHEN** no working RPC for the selected chain is available or the signer is not
+  the current owner
+- **THEN** no mutation transaction is sent for that contract and a clear error is reported
+
+### Requirement: Network RPC lists and key-free inspection
+
+The CLI SHALL read per-network RPC URL lists from a separate YAML file.
+The `eth` key SHALL identify Ethereum mainnet (chain ID 1), and `arb` SHALL
+identify Arbitrum One (chain ID 42161). The existing `NETWORK=ethereum` and
+`NETWORK=arbitrum` command values SHALL select those lists respectively, without
+changing canonical network names in the registry. Endpoints from another network
+SHALL NOT be used as fallbacks. The CLI SHALL try endpoints sequentially in YAML
+order, using bounded request timeouts, and use the first endpoint that responds
+successfully with the expected chain ID. Unreachable or wrong-chain endpoints
+SHALL be skipped. Selection SHALL stop at the first working endpoint; if the list
+is empty or no endpoint works, the command SHALL fail without broadcasting.
+RPC selection SHALL NOT automatically retry transaction submission when its
+outcome is uncertain. The CLI SHALL retain the transaction hash and report the
+uncertain outcome rather than reporting success or a confirmed revert.
+
+The CLI SHALL support a local `.env` containing the signing private key and
+explorer API key. `.env` SHALL be excluded from Git and a secret-free
+`.env.example` SHALL document those settings. RPC URLs containing credentials
+SHALL receive the same protection against committing or printing secrets.
+Private keys SHALL NOT be stored in the registry, input JSON, RPC YAML, Makefile,
+command arguments, or printed output, including errors. Public inspection SHALL
+NOT require signing or explorer secrets.
+
+#### Scenario: Select the network RPC list
+- **GIVEN** a YAML file contains `eth` and `arb` RPC URL lists
+- **WHEN** the operator selects `NETWORK=arbitrum`
+- **THEN** only the `arb` list is eligible for RPC access
+- **AND** a selected endpoint must report chain ID 42161 before transactions are sent
+
+#### Scenario: First working endpoint wins
+- **GIVEN** the first configured endpoint is unavailable, the second responds with
+  the expected chain ID, and a third endpoint is also configured
+- **WHEN** the CLI selects an RPC endpoint
+- **THEN** it tries the first and then the second endpoint, uses the second, and
+  does not probe the third
+
+#### Scenario: No usable endpoint
+- **WHEN** the selected network list is empty or every endpoint is unreachable or
+  reports another chain ID
+- **THEN** the command reports an RPC selection error and broadcasts nothing
+
+#### Scenario: Submission result is uncertain
+- **WHEN** the connection fails after a signed transaction may have been submitted
+- **THEN** the command reports its hash and the uncertain outcome
+- **AND** it does not automatically submit another transaction through the next RPC
+
+#### Scenario: Mutate using a local signing key
+- **WHEN** an owner operation loads a valid private key from `.env`
+- **THEN** it uses the derived signer without exposing the key in commands or logs
+
+#### Scenario: Missing signing key
+- **WHEN** a mutation command has no usable signing key
+- **THEN** it fails before broadcasting a transaction
+- **AND** read-only inspection remains available with RPC configuration alone
+
+### Requirement: Confirmed deployment registration and source verification
+
+After confirmed successful deployment, the CLI SHALL save the contract's name,
+description, network, and address to `contracts.json` while preserving existing
+entries. It SHALL then submit matching source and build metadata for verification
+on Etherscan or Arbiscan as appropriate, checking the verification result rather
+than treating submission as success. Deployment and verification SHALL be reported
+as separate outcomes. Verification failure SHALL preserve the registered deployment
+and report the address, transaction hash, and error. `make verify` SHALL retry source
+verification for an existing contract without deploying another instance. Failure
+to save the registry after deployment SHALL report the deployed address and hash
+for recovery and SHALL NOT trigger automatic redeployment.
+
+#### Scenario: Deploy and verify successfully
+- **WHEN** deployment is confirmed and source verification succeeds
+- **THEN** the registry contains the new contract alongside all previous entries
+- **AND** the output provides its address, transaction hash, and explorer link
+
+#### Scenario: Deployment fails
+- **WHEN** the deployment transaction fails
+- **THEN** no new contract entry is registered and verification is not attempted
+
+#### Scenario: Verification fails after deployment
+- **WHEN** deployment succeeds but verification fails
+- **THEN** the contract remains registered and the command reports the partial outcome
+- **AND** a later `make verify CONTRACT=<address>` retries only verification
+
+#### Scenario: Registry write fails after deployment
+- **WHEN** the contract is deployed but the registry cannot be saved
+- **THEN** existing registry contents are preserved and the address and transaction
+  hash are reported with a nonzero command outcome
+- **AND** the tool does not automatically send another deployment transaction
+
+### Requirement: Sequential batch distribution and per-contract reporting
+
+`distribute-all` SHALL visit every unique known contract on the selected network
+in registry order, sequentially rather than submitting transactions in parallel.
+It SHALL skip zero USDT balances without sending a transaction and continue after
+individual contract errors. Each submitted transaction SHALL be tracked to its
+outcome before that contract is reported as successful. The command SHALL report
+one outcome per contract, using its name and enough address context to disambiguate
+duplicate names. Statuses SHALL distinguish `OK`, `SKIPPED: empty balance`, and
+`distribution err: <reason>`. Submitted transaction hashes SHALL be available in
+output; missing confirmation SHALL NOT be reported as success. The final exit
+status SHALL be nonzero if any contract failed, and zero if all succeeded or were
+skipped. An empty selection SHALL report that no contracts matched and send nothing.
+Successful transactions for other contracts SHALL NOT be rolled back on a later
+failure. Shared input or network validation errors SHALL fail before the batch.
+
+#### Scenario: Mixed batch outcomes
+- **GIVEN** pool A can distribute, pool B fails, pool C is empty, and pool D can distribute
+- **WHEN** the operator runs `make distribute-all`
+- **THEN** A and D are processed successfully in sequence, B is reported as an error,
+  and C is skipped without a transaction
+- **AND** the final command status is nonzero with a separate outcome for all four pools
+
+#### Scenario: All contracts are empty
+- **WHEN** every selected contract has zero USDT
+- **THEN** every contract is reported as skipped, no transaction is sent, and the
+  command exits successfully
+
+#### Scenario: Other networks are excluded
+- **WHEN** the operator runs `make distribute-all NETWORK=arbitrum`
+- **THEN** no Ethereum registry entry is submitted for distribution
