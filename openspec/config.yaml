@@ -1,0 +1,41 @@
+schema: spec-driven
+
+context: |
+  Read the repository-root AGENTS.md for project context and working rules.
+  Pooler is a future EVM smart contract project for distributing rewards to participants.
+  The project is in the specification phase; detailed contract behavior is not yet decided.
+  Use OpenSpec to describe and evolve project behavior.
+  Write all documentation and OpenSpec artifacts in English.
+  Use the grill-me skill (which delegates to grilling) during specification and documentation discussions.
+  Keep confirmed requirements distinct from recommendations and unresolved decisions.
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
