@@ -7,7 +7,7 @@ The repository currently contains agent instructions, OpenSpec setup, and a mini
 [proposal.md](proposal.md) for motivation and
 [the specification](specs/usdt-reward-distributor/spec.md) for agreed behavior.
 
-This design is needed because the contract controls funds, performs up to 301
+This design is needed because the contract controls funds, performs up to 101
 token transfers per distribution, and must preserve exact allocation and rollback
 semantics. It describes future implementation; this change does not implement it.
 
@@ -38,9 +38,20 @@ configuration. Validate the token address as a nonzero contract address; the
 deployment process must separately verify that it is the intended USDT on the
 selected chain. Generic token discovery or switching would add unsupported scope.
 
-Do not infer the intended chain or token address from a ticker. Exact network,
-token address, compiler, and test-tool versions are deployment/implementation
-inputs still to be selected and checked; they do not change allocation behavior.
+The selected production tokens are Ethereum mainnet USD₮ at
+`0xdAC17F958D2ee523a2206206994597C13D831ec7` (chain ID 1) and Arbitrum One USD₮0 at
+`0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` (chain ID 42161), both with six
+decimals. Their addresses are confirmed by [Tether's supported protocols](https://tether.to/en/supported-protocols/)
+and [USDT0's deployment list](https://docs.usdt0.to/technical-documentation/deployments);
+USDT0 documents its precision in the [developer guide](https://docs.usdt0.to/technical-documentation/developer/).
+These references were checked on 2026-11-21; this is documentary verification,
+not a completed RPC integration test.
+
+Tether documents that Ethereum USD₮ transfers do not return a Boolean value.
+Tests must cover this behavior and the actual Arbitrum USD₮0 implementation
+separately. Do not infer token behavior from the ticker. Verify deployed code,
+decimals, and transfer compatibility against these exact addresses during
+integration. Compiler, library, and contract test-tool versions remain open.
 
 ### Complete recipient list with integer basis points
 
@@ -106,15 +117,35 @@ no-op; no pending-owner or confirmation state is introduced.
 
 ### Preserve the agreed capacity
 
-Keep the 300-recipient limit and atomic payout requirement explicit. Measure
-distribution with 300 nonzero payouts and a distinct fee wallet, including
+Keep the 100-recipient limit and atomic payout requirement explicit. Measure
+distribution with 100 nonzero payouts and a distinct fee wallet, including
 recipients with no prior token balance. Also check full-list replacement at the
 limit. Do not introduce batching or lower the limit unless measurements show a
 problem and the specification is explicitly revised.
 
+### Foundry contract tests and Go integration tests
+
+Use Foundry/Forge to build the Solidity contract and run Solidity unit, fuzz,
+and invariant tests. Cover validation, exact allocation and rounding, ownership,
+full rollback, and reentrant interactions; use controlled token mocks for failure
+cases. Run compatibility tests against the specified Ethereum USD₮ and Arbitrum
+USD₮0 deployments on forks pinned to recorded block numbers.
+
+Use Go for CLI tests and integration tests against Anvil, including transaction
+submission, receipt handling, and the operator workflows. Pin Foundry, the Solidity
+compiler, and required library versions during implementation setup.
+
+Record 100-recipient deployment, replacement, and distribution gas measurements
+on both network forks. A local fork does not prove acceptance under live network
+limits or reproduce Arbitrum's L1 data-posting costs; deployment readiness also
+requires network-specific RPC estimates with the final transaction and suitable
+contract state. Record the conditions and limitations of those checks. No gas
+measurement has been performed during this specification change.
+
 ### Go CLI with Makefile defaults
 
-Implement the operator commands in Go within the existing module. Makefile targets
+Implement the operator commands and auxiliary actions in Go within the existing
+module. Makefile targets
 forward arguments to that CLI rather than containing RPC, signing, JSON, or menu
 logic. Define `NETWORK ?= arbitrum` and `INPUT ?= input.json` at the top of the
 Makefile. Pass paths as single arguments so input paths containing spaces work.
@@ -167,12 +198,37 @@ produced by the build. The `show` command must not fetch its ABI from an explore
 or need an explorer API key. Format shares as decimal percentages for the user,
 while retaining integer basis points in transaction inputs.
 
-Load `.env` in the Go process as configuration data, not as shell commands. Include
-the signing private key, per-network RPC endpoints, and the explorer API key in its
-documented settings. Add `.env` to `.gitignore` and a secret-free `.env.example`
-during implementation. Do not pass secrets as Make arguments or echo them in
-commands, error messages, or diagnostics. Public reads need only RPC configuration;
-load and require signing/explorer credentials only for operations that use them.
+Load network RPC lists from a separate `rpc.yml` file in the Go process:
+
+```yaml
+eth:
+  - https://ethereum-rpc-1.example
+  - https://ethereum-rpc-2.example
+arb:
+  - https://arbitrum-rpc-1.example
+  - https://arbitrum-rpc-2.example
+```
+
+These URLs illustrate the shape only; actual endpoints are supplied by the
+operator. Map canonical `ethereum` to `eth` and `arbitrum` to `arb` at the
+configuration boundary. Keep network identity consistent in registry filtering,
+chain-ID validation, signing, and explorer selection. Try endpoints sequentially
+in YAML order, using bounded request timeouts, and use the first endpoint that
+responds successfully with the expected chain ID. Skip unreachable or wrong-chain
+endpoints; stop searching once a working endpoint is found. If none works, report
+an error without broadcasting. No parallel probing or load balancing is needed.
+This connection selection does not authorize transaction retries: retain the hash
+and report an uncertain outcome if submission or confirmation cannot be established,
+without automatically creating or resubmitting a transaction.
+
+Load `.env` as configuration data, not shell commands, for the signing private
+key and explorer API key. Document those settings in a secret-free `.env.example`.
+Keep the actual `.env` and local `rpc.yml` out of Git and provide a
+`rpc.example.yml` with placeholder URLs during implementation, since provider
+URLs may contain credentials. Do not pass secrets as Make arguments or echo them
+in commands, error messages, or diagnostics. Public reads need only RPC
+configuration; require signing/explorer credentials only for operations that
+use them.
 
 Before an existing-contract mutation, read its owner and compare it with the signer.
 Show the chosen network and contract in output. Validate shared settings before
@@ -241,7 +297,7 @@ error; batch skipping is an operator-tool behavior.
   owner can replace the list, change the fee wallet, or attempt full withdrawal.
   Withdrawal cannot bypass restrictions imposed by the token itself.
 - Large lists may exceed a network transaction limit or be expensive → Require
-  measured validation of 300-recipient operations before deployment readiness.
+  measured validation of 100-recipient operations before deployment readiness.
 - A wrong immutable token address or fee cannot be corrected in place → Verify
   deployment inputs; recovery requires owner withdrawal and a new deployment.
 - Funding alone does not trigger payouts → The owner must submit a transaction
@@ -264,13 +320,12 @@ deployment, verify its source, and inspect live configuration before funding. If
 deployed version must be replaced, the owner
 can withdraw USDT and fund a new deployment; no proxy upgrade is available.
 
-## Open Questions
+## Remaining implementation setup
 
-- Which USDT address and RPC endpoint will each supported network use? Verify them
-  before integration tests and deployment. Arbitrum is the default network, but no
-  token address or RPC endpoint is asserted in this change.
-- Which contract compiler, test runner, and compatible library versions will be
-  used? Select them during implementation setup and pin reproducible versions.
+The token addresses, Foundry/Solidity testing approach, Go operator tooling, and
+ordered first-working RPC selection are decided. During implementation setup,
+pin compatible Foundry, Solidity compiler, and library versions. Real provider
+URLs remain operator configuration.
 
-The unmeasured 300-recipient gas requirement is an outstanding verification item,
+The unmeasured 100-recipient gas requirement is an outstanding verification item,
 not permission to change the agreed behavior or a claim of deployment readiness.

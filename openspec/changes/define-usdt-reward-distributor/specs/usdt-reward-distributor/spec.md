@@ -19,6 +19,18 @@ address and fee rate SHALL be immutable, and the contract SHALL expose no logic
 upgrade mechanism. Only ownership, the fee wallet, and the full recipient list
 with its shares SHALL be mutable configuration.
 
+The supported production deployments SHALL use the following network/token pairs.
+Both tokens have six decimal places; all allocation arithmetic SHALL continue to
+use integer base units.
+
+| Network | Chain ID | Token | Token contract |
+| --- | --- | --- | --- |
+| Ethereum mainnet | 1 | USD₮ (USDT) | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
+| Arbitrum One | 42161 | USD₮0 (USDT0) | `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` |
+
+In this specification, "USDT" refers to the selected network's token above; it
+does not imply that both networks use identical token implementations.
+
 #### Scenario: Valid deployment
 - **WHEN** the contract is deployed with valid initial configuration
 - **THEN** it is ready to receive USDT and execute owner-authorized operations
@@ -51,7 +63,7 @@ percentage precision SHALL NOT restrict amounts to two decimal places.
 
 ### Requirement: Valid complete recipient lists
 
-Recipients SHALL be supplied as a list of address/share pairs containing 1–300
+Recipients SHALL be supplied as a list of address/share pairs containing 1–100
 entries. Addresses SHALL be unique, nonzero, and different from the distributor
 address. Each share SHALL be positive and the total SHALL equal exactly 10000
 basis points. These checks SHALL apply both at deployment and on replacement.
@@ -72,9 +84,9 @@ An owner or fee wallet SHALL be allowed to also appear once as a recipient.
 - **THEN** the configuration operation reverts without installing the list
 
 #### Scenario: Recipient count boundaries
-- **WHEN** an otherwise valid list contains exactly 300 recipients
+- **WHEN** an otherwise valid list contains exactly 100 recipients
 - **THEN** the list is accepted
-- **WHEN** a list is empty or contains more than 300 recipients
+- **WHEN** a list is empty or contains more than 100 recipients
 - **THEN** the configuration operation reverts
 
 ### Requirement: Atomic recipient replacement
@@ -262,14 +274,14 @@ token transfers in that case.
 
 ### Requirement: Full-size atomic distribution
 
-The implementation SHALL support a valid list of 300 recipients in a single atomic
+The implementation SHALL support a valid list of 100 recipients in a single atomic
 distribution on the selected deployment network. Deployment readiness SHALL include
 a measured gas check using representative worst-case token transfers. If this check
 fails, the implementation SHALL NOT silently lower the limit or split payouts across
 transactions; the requirement SHALL be revisited before release.
 
 #### Scenario: Maximum-size distribution
-- **GIVEN** a valid 300-recipient list and sufficient USDT for every payout to be nonzero
+- **GIVEN** a valid 100-recipient list and sufficient USDT for every payout to be nonzero
 - **WHEN** the owner distributes under the selected network's transaction limits
 - **THEN** all payouts and the fee complete in one transaction with zero remaining USDT
 - **AND** recorded validation demonstrates that execution fits those limits
@@ -291,7 +303,8 @@ verification. Local input files SHALL NOT substitute for current on-chain state.
 
 ### Requirement: Makefile command interface and defaults
 
-Operator tooling SHALL be implemented in Go and exposed through Makefile targets
+Operator tooling and auxiliary actions SHALL be implemented in Go. Operator
+commands SHALL be exposed through Makefile targets
 `deploy`, `set-distribution`, `show`, `distribute`, `distribute-all`, and `verify`.
 The top of the Makefile SHALL define overridable defaults `NETWORK ?= arbitrum`
 and `INPUT ?= input.json`. Invocation-supplied values SHALL override those defaults.
@@ -383,17 +396,56 @@ registry entries. A successful recipient replacement SHALL be confirmed on-chain
 - **AND** its immutable fee rate and other configuration remain unchanged
 
 #### Scenario: Wrong network or owner
-- **WHEN** the RPC reports another chain or the signer is not the current owner
+- **WHEN** no working RPC for the selected chain is available or the signer is not
+  the current owner
 - **THEN** no mutation transaction is sent for that contract and a clear error is reported
 
-### Requirement: Local secrets and key-free inspection
+### Requirement: Network RPC lists and key-free inspection
 
-The CLI SHALL support a local `.env` containing the signing private key, network
-RPC configuration, and explorer API key. `.env` SHALL be excluded from Git and a
-secret-free `.env.example` SHALL document the settings. Private keys SHALL NOT be
-stored in the registry, input JSON, Makefile, command arguments, or printed output,
-including errors. Public inspection SHALL NOT require signing or explorer secrets.
-The effective network SHALL determine which RPC endpoint is used.
+The CLI SHALL read per-network RPC URL lists from a separate YAML file.
+The `eth` key SHALL identify Ethereum mainnet (chain ID 1), and `arb` SHALL
+identify Arbitrum One (chain ID 42161). The existing `NETWORK=ethereum` and
+`NETWORK=arbitrum` command values SHALL select those lists respectively, without
+changing canonical network names in the registry. Endpoints from another network
+SHALL NOT be used as fallbacks. The CLI SHALL try endpoints sequentially in YAML
+order, using bounded request timeouts, and use the first endpoint that responds
+successfully with the expected chain ID. Unreachable or wrong-chain endpoints
+SHALL be skipped. Selection SHALL stop at the first working endpoint; if the list
+is empty or no endpoint works, the command SHALL fail without broadcasting.
+RPC selection SHALL NOT automatically retry transaction submission when its
+outcome is uncertain. The CLI SHALL retain the transaction hash and report the
+uncertain outcome rather than reporting success or a confirmed revert.
+
+The CLI SHALL support a local `.env` containing the signing private key and
+explorer API key. `.env` SHALL be excluded from Git and a secret-free
+`.env.example` SHALL document those settings. RPC URLs containing credentials
+SHALL receive the same protection against committing or printing secrets.
+Private keys SHALL NOT be stored in the registry, input JSON, RPC YAML, Makefile,
+command arguments, or printed output, including errors. Public inspection SHALL
+NOT require signing or explorer secrets.
+
+#### Scenario: Select the network RPC list
+- **GIVEN** a YAML file contains `eth` and `arb` RPC URL lists
+- **WHEN** the operator selects `NETWORK=arbitrum`
+- **THEN** only the `arb` list is eligible for RPC access
+- **AND** a selected endpoint must report chain ID 42161 before transactions are sent
+
+#### Scenario: First working endpoint wins
+- **GIVEN** the first configured endpoint is unavailable, the second responds with
+  the expected chain ID, and a third endpoint is also configured
+- **WHEN** the CLI selects an RPC endpoint
+- **THEN** it tries the first and then the second endpoint, uses the second, and
+  does not probe the third
+
+#### Scenario: No usable endpoint
+- **WHEN** the selected network list is empty or every endpoint is unreachable or
+  reports another chain ID
+- **THEN** the command reports an RPC selection error and broadcasts nothing
+
+#### Scenario: Submission result is uncertain
+- **WHEN** the connection fails after a signed transaction may have been submitted
+- **THEN** the command reports its hash and the uncertain outcome
+- **AND** it does not automatically submit another transaction through the next RPC
 
 #### Scenario: Mutate using a local signing key
 - **WHEN** an owner operation loads a valid private key from `.env`

@@ -11,10 +11,11 @@ the operator deploy, inspect, and manage multiple independent instances.
 ## What Changes
 
 - Define an independently deployed, non-upgradeable USDT distributor for Ethereum
-  or Arbitrum, with the token address and fee rate fixed at deployment.
+  mainnet (USD₮) or Arbitrum One (USD₮0), using the selected token addresses in
+  the specification, with the token address and fee rate fixed at deployment.
 - Accept ordinary USDT funding and distribute the full balance only when the
   owner calls `distribute()`.
-- Configure 1–300 unique recipients using address/share pairs with 0.01%
+- Configure 1–100 unique recipients using address/share pairs with 0.01%
   precision and a total share of exactly 100%.
 - Pay participants from the balance after the base fee; send the base fee and all
   rounding residue to a separately configured fee wallet, leaving zero USDT.
@@ -30,8 +31,13 @@ the operator deploy, inspect, and manage multiple independent instances.
   is supplied interactively.
 - Register confirmed deployments in `contracts.json` with name, description,
   network, and address; keep names independent from contract identity.
-- Load signing and connection secrets from an ignored `.env`, provide a secret-free
-  `.env.example`, and verify source on the selected network's explorer after deploy.
+- Use Foundry for contract builds and Solidity tests, and Go for operator and
+  auxiliary actions plus CLI integration tests against Anvil.
+- Store per-network RPC URL lists in a separate YAML file with `eth` and `arb` keys.
+  Try endpoints in listed order and use the first working endpoint for the network.
+  Keep signing and explorer secrets in an ignored `.env`, provide secret-free
+  configuration examples, and verify source on the selected network's explorer
+  after deploy.
 
 ## Capabilities
 
@@ -50,7 +56,7 @@ None. The repository has no existing behavior specifications.
 This change produces planning artifacts only. No contract implementation,
 deployment, or executable tests are included at this stage. Future implementation
 will require a contract, Go CLI, Makefile, deployment and verification artifacts,
-registry, environment examples, regression tests, and a gas check for 300 recipients
+registry, environment examples, regression tests, and a gas check for 100 recipients
 against the selected network and USDT deployment. Registry metadata is local;
 current contract configuration remains on-chain. Explorer verification failures
 must be recoverable without another deployment.
