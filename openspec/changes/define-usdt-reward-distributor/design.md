@@ -2,8 +2,8 @@
 
 ## Context
 
-The repository currently contains agent instructions and OpenSpec setup, with no
-contract, build toolchain, tests, or deployment configuration. See
+The repository currently contains agent instructions, OpenSpec setup, and a minimal
+`go.mod`, with no contract, executable CLI, Makefile, tests, or deployment tooling. See
 [proposal.md](proposal.md) for motivation and
 [the specification](specs/usdt-reward-distributor/spec.md) for agreed behavior.
 
@@ -17,6 +17,8 @@ semantics. It describes future implementation; this change does not implement it
 - Use a single contract with local ownership of configuration and payout logic.
 - Make allocation reproducible using integer arithmetic and one balance snapshot.
 - Preserve atomicity and a zero USDT balance after successful payout operations.
+- Provide a Go CLI with a small Makefile interface for independently deployed
+  contracts, using the chain as the source of current configuration.
 
 **Non-Goals:**
 - No per-deposit history, participant claim balances, rounding reserves, or
@@ -110,6 +112,124 @@ recipients with no prior token balance. Also check full-list replacement at the
 limit. Do not introduce batching or lower the limit unless measurements show a
 problem and the specification is explicitly revised.
 
+### Go CLI with Makefile defaults
+
+Implement the operator commands in Go within the existing module. Makefile targets
+forward arguments to that CLI rather than containing RPC, signing, JSON, or menu
+logic. Define `NETWORK ?= arbitrum` and `INPUT ?= input.json` at the top of the
+Makefile. Pass paths as single arguments so input paths containing spaces work.
+Invocation overrides take precedence. No separate state daemon is needed.
+
+| Target | Behavior | Input |
+| --- | --- | --- |
+| `make deploy` | Deploy, register, then verify source | Effective `NETWORK` and `INPUT` |
+| `make set-distribution` | Replace the full recipient list | `INPUT`, selected or explicit contract |
+| `make show` | Read current configuration and USDT balance | Selected or explicit contract |
+| `make distribute` | Call one contract's `distribute()` | Selected or explicit contract |
+| `make distribute-all` | Visit known contracts of the selected network sequentially | Registry and `NETWORK` |
+| `make verify` | Retry explorer source verification without deploy | Selected or explicit contract, build metadata |
+
+`CONTRACT=<address>` bypasses interactive selection for single-contract commands.
+Otherwise, a terminal menu filters the registry by network and supports arrow keys
+and Enter for one selection. Display long names and descriptions as labels, with
+addresses to distinguish duplicates. Cancelling sends nothing. Missing terminal
+input must fail promptly with guidance to supply `CONTRACT`; never guess a target.
+Reuse a small suitable terminal component at implementation time rather than
+building a full terminal UI framework.
+
+### Registry metadata and operation inputs
+
+Use `contracts.json` as a JSON array of objects with `name`, `description`, `network`,
+and `address`. Names need no slug and are not unique identifiers. Validate addresses
+and use normalized network/address pairs for uniqueness; preserve human-readable
+labels. Missing registry on the first deployment means an empty registry, whereas
+malformed existing contents are an error. Write updates using a temporary file and
+replacement so a failed save does not truncate the previous registry. No database,
+discovery service, or local mirror of allocation state is needed.
+
+Resolve the canonical network name to its expected chain ID and RPC settings, and
+check the RPC chain ID before signing. An explicit address can target an existing
+instance without first adding it to the registry. Registry operations and batch
+selection remain scoped to the effective network.
+
+Use one operation-input JSON format with a `recipients` array of address/shareBps
+pairs. Deployment additionally requires `name`, `description`, `owner`, `feeWallet`,
+`feeBps`, and `token`. Recipient replacement consumes and validates only `recipients`
+and never attempts to change other parameters from that file. The Makefile selects
+the network; it is not duplicated in the operation input. These files are requests,
+not a mandatory `pools/` directory or the authority for current configuration.
+
+### Read-only inspection and local signing
+
+Expose contract getters for recipients and shares, owner, fee wallet, fee basis
+points, and token. Read these plus the token balance through RPC using the ABI
+produced by the build. The `show` command must not fetch its ABI from an explorer
+or need an explorer API key. Format shares as decimal percentages for the user,
+while retaining integer basis points in transaction inputs.
+
+Load `.env` in the Go process as configuration data, not as shell commands. Include
+the signing private key, per-network RPC endpoints, and the explorer API key in its
+documented settings. Add `.env` to `.gitignore` and a secret-free `.env.example`
+during implementation. Do not pass secrets as Make arguments or echo them in
+commands, error messages, or diagnostics. Public reads need only RPC configuration;
+load and require signing/explorer credentials only for operations that use them.
+
+Before an existing-contract mutation, read its owner and compare it with the signer.
+Show the chosen network and contract in output. Validate shared settings before
+starting a batch, then handle contract-specific problems as individual outcomes.
+
+### Confirmed deployment and independently retryable verification
+
+Validate deployment input and registry readability before broadcasting. Wait for a
+successful deployment receipt and verify deployed code, then register the address
+before starting explorer verification. Report the address and transaction hash
+even if a subsequent registry save or verification fails; never turn either failure
+into an automatic second deployment.
+
+Preserve the exact compiler input, version, settings, and encoded constructor
+arguments in build/deployment artifacts sufficient for later `make verify`. They
+describe deployment provenance, not current participant configuration, and contain
+no private keys. Register only the four agreed identity/description fields in
+`contracts.json`; do not use it for compiler metadata or live allocations.
+
+Submit the matching source/build input to the explorer for the selected chain and
+check the result of verification. A submission identifier alone is not success.
+If verification fails or remains pending at timeout, keep the confirmed deployment,
+report its status separately, and provide the retry command. The command returns
+a nonzero outcome when registration or required verification remains unsuccessful.
+An already verified matching contract counts as successful verification.
+
+The protocol distinction is documented by
+[Ethereum's read-only RPC](https://ethereum.org/developers/docs/apis/json-rpc/)
+and [Etherscan's verification workflow](https://docs.etherscan.io/contract-verification/verify-with-api).
+Read-only methods work independently of verification; publishing matching source
+also enables explorer inspection. Select supported API details during implementation.
+
+### Sequential distribution and terminal outcomes
+
+Use one sequential loop over the selected network's registry entries. Read each
+balance, skip empty contracts, and submit owner-authorized distribution for each
+funded contract. Track transaction confirmation before reporting `OK`; retain the
+transaction hash if confirmation cannot be established, and do not label an
+unknown outcome as a confirmed revert or automatically resubmit it.
+
+Print a result per contract and continue past individual errors, for example:
+
+```text
+pool A: OK
+pool B: distribution err: ABC
+pool C: SKIPPED: empty balance
+pool D: OK
+```
+
+Include address context where names collide, and make submitted transaction hashes
+available in the output. Return nonzero if any entry has an error; successful and
+skipped entries alone produce zero. With no matching entries, report that there is
+nothing to process. This is a sequence of independent transactions, not an atomic
+operation across pools. No concurrency, retry queue, or cross-pool rollback layer
+is needed. Individual direct `distribute()` calls retain the on-chain empty-balance
+error; batch skipping is an operator-tool behavior.
+
 ## Risks / Trade-offs
 
 - Trusted owner can redirect allocations or withdraw all USDT → This is the
@@ -126,19 +246,29 @@ problem and the specification is explicitly revised.
   deployment inputs; recovery requires owner withdrawal and a new deployment.
 - Funding alone does not trigger payouts → The owner must submit a transaction
   and fund its network execution fee separately.
+- One signing key can control several independent pools → Keep it out of Git and
+  output, and check current ownership before mutations; compromise affects every
+  pool owned by that address.
+- Deploy can succeed while local registration or explorer verification fails →
+  Preserve existing registry data, report the deployed address/hash, and retry only
+  the failed local or verification step without sending a new deployment.
+- A batch can partially succeed → Print per-contract results and an aggregate exit
+  status; never imply that successful independent transactions were rolled back.
 
 ## Migration Plan
 
 There is no existing contract or data migration. After implementation is separately
 authorized, verify the selected USDT deployment, run focused tests and full-size
-gas checks, and deploy with validated initial configuration. Verify the deployed
-configuration before funding. If a deployed version must be replaced, the owner
+gas checks, and deploy with validated initial configuration. Register the confirmed
+deployment, verify its source, and inspect live configuration before funding. If a
+deployed version must be replaced, the owner
 can withdraw USDT and fund a new deployment; no proxy upgrade is available.
 
 ## Open Questions
 
-- Which exact network and USDT address will the first deployment use? Verify them
-  before integration tests and deployment; no address is asserted in this change.
+- Which USDT address and RPC endpoint will each supported network use? Verify them
+  before integration tests and deployment. Arbitrum is the default network, but no
+  token address or RPC endpoint is asserted in this change.
 - Which contract compiler, test runner, and compatible library versions will be
   used? Select them during implementation setup and pin reproducible versions.
 

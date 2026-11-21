@@ -4,7 +4,9 @@
 
 Define an owner-controlled USDT distributor that pays configured participant
 shares and a fixed-rate fee atomically, including deterministic rounding and
-full-balance recovery under an explicitly trusted owner.
+full-balance recovery under an explicitly trusted owner. Provide operator commands
+to deploy, inspect, and manage independent instances without duplicating their
+live configuration locally.
 
 ## ADDED Requirements
 
@@ -271,3 +273,198 @@ transactions; the requirement SHALL be revisited before release.
 - **WHEN** the owner distributes under the selected network's transaction limits
 - **THEN** all payouts and the fee complete in one transaction with zero remaining USDT
 - **AND** recorded validation demonstrates that execution fits those limits
+
+### Requirement: Public configuration inspection
+
+The contract SHALL expose public read-only methods returning the complete current
+recipient address/share list, owner, fee wallet, fee rate, and USDT token address.
+The `show` command SHALL read these values and the current USDT balance from the
+selected network, displaying percentages at their agreed precision. Reading SHALL
+NOT require the owner's private key, a transaction, or successful explorer
+verification. Local input files SHALL NOT substitute for current on-chain state.
+
+#### Scenario: Inspect a changed contract
+- **GIVEN** the owner changed recipients through a different client
+- **WHEN** an operator runs `make show` for that contract
+- **THEN** the command displays the current on-chain list and configuration
+- **AND** it works without a configured private key or verified explorer source
+
+### Requirement: Makefile command interface and defaults
+
+Operator tooling SHALL be implemented in Go and exposed through Makefile targets
+`deploy`, `set-distribution`, `show`, `distribute`, `distribute-all`, and `verify`.
+The top of the Makefile SHALL define overridable defaults `NETWORK ?= arbitrum`
+and `INPUT ?= input.json`. Invocation-supplied values SHALL override those defaults.
+`INPUT` SHALL only be required for deployment and recipient replacement; the
+other commands SHALL work without an input file. Network selection SHALL apply
+consistently to RPC calls, signing, registry filtering, and explorer verification.
+
+#### Scenario: Use defaults
+- **WHEN** the operator runs `make deploy` without variable overrides
+- **THEN** it selects Arbitrum and reads deployment parameters from `input.json`
+
+#### Scenario: Override defaults
+- **WHEN** the operator runs `make deploy NETWORK=ethereum INPUT=other.json`
+- **THEN** it uses Ethereum and `other.json` without editing the Makefile
+
+#### Scenario: Input-independent operation
+- **WHEN** the operator runs `make distribute CONTRACT=<address>` with no input file
+- **THEN** missing `input.json` does not prevent distribution on the selected network
+
+### Requirement: Minimal network-scoped contract registry
+
+`contracts.json` SHALL store a JSON list of entries with separate `name`,
+`description`, `network`, and `address` fields. Names SHALL support spaces and long
+human-readable labels and SHALL NOT be used as transaction identifiers. Contract
+identity SHALL be the selected network plus address; duplicate entries for that
+identity SHALL be rejected. Identical names and addresses on different networks
+SHALL remain distinguishable. The registry SHALL NOT store private keys or serve
+as a persisted copy of shares, fee rates, or other live contract configuration.
+
+#### Scenario: Same address on different networks
+- **GIVEN** entries have the same address on Ethereum and Arbitrum
+- **WHEN** the operator selects Arbitrum
+- **THEN** only the Arbitrum entry is eligible for selection or batch distribution
+
+#### Scenario: Human-readable names
+- **WHEN** two entries have the same long name containing spaces
+- **THEN** both can be displayed and distinguished by network and address
+- **AND** no slug derived from the name determines the transaction destination
+
+#### Scenario: Invalid registry
+- **WHEN** a command requiring the registry encounters malformed entries or a
+  duplicate network/address pair
+- **THEN** it reports a validation error before sending transactions
+
+### Requirement: Interactive or explicit contract selection
+
+Single-contract commands SHALL accept `CONTRACT=<address>` to bypass selection.
+Without that argument in an interactive terminal, they SHALL display the known
+contracts for the selected network, showing name, description, and address, and
+allow selection of exactly one contract with arrow keys and Enter. Cancelling
+SHALL send no transaction. Without an interactive terminal and without an explicit
+address, the command SHALL fail with instructions to supply `CONTRACT`; it SHALL
+NOT hang or silently select the first entry. An explicit valid contract address
+SHALL be usable without registration on the selected network.
+
+#### Scenario: Select a contract interactively
+- **WHEN** the operator runs `make distribute` in an interactive terminal
+- **THEN** a network-filtered contract menu appears
+- **AND** confirming an entry targets only that contract for distribution
+
+#### Scenario: Explicit address
+- **WHEN** the operator runs `make distribute CONTRACT=<address>`
+- **THEN** the command targets that address on the effective network without a menu
+
+#### Scenario: No eligible selection
+- **WHEN** no known contracts exist on the selected network and no address is supplied
+- **THEN** the command explains that no contract is available and sends no transaction
+
+#### Scenario: Noninteractive invocation
+- **WHEN** a single-contract command has neither a terminal nor `CONTRACT`
+- **THEN** it fails promptly with an actionable error and sends no transaction
+
+### Requirement: Operation input and preflight validation
+
+Deployment SHALL read the initial contract parameters and registry name/description
+from the JSON file selected by `INPUT`. Recipient replacement SHALL read the full
+proposed address/share list from `INPUT` and change only that list. Shares and fee
+rates SHALL use integer basis points. Files SHALL be operation inputs, not a
+required per-pool configuration store. Before sending a transaction, the CLI SHALL
+validate the relevant inputs, selected network and RPC chain identity, destination,
+and signing configuration. Existing-contract mutations SHALL verify that the signer
+matches the current on-chain owner. Invalid input SHALL NOT change chain state or
+registry entries. A successful recipient replacement SHALL be confirmed on-chain.
+
+#### Scenario: Change distribution from input
+- **WHEN** the operator runs `make set-distribution INPUT=new-shares.json` and
+  selects a contract
+- **THEN** the complete validated recipient list is submitted to that contract
+- **AND** its immutable fee rate and other configuration remain unchanged
+
+#### Scenario: Wrong network or owner
+- **WHEN** the RPC reports another chain or the signer is not the current owner
+- **THEN** no mutation transaction is sent for that contract and a clear error is reported
+
+### Requirement: Local secrets and key-free inspection
+
+The CLI SHALL support a local `.env` containing the signing private key, network
+RPC configuration, and explorer API key. `.env` SHALL be excluded from Git and a
+secret-free `.env.example` SHALL document the settings. Private keys SHALL NOT be
+stored in the registry, input JSON, Makefile, command arguments, or printed output,
+including errors. Public inspection SHALL NOT require signing or explorer secrets.
+The effective network SHALL determine which RPC endpoint is used.
+
+#### Scenario: Mutate using a local signing key
+- **WHEN** an owner operation loads a valid private key from `.env`
+- **THEN** it uses the derived signer without exposing the key in commands or logs
+
+#### Scenario: Missing signing key
+- **WHEN** a mutation command has no usable signing key
+- **THEN** it fails before broadcasting a transaction
+- **AND** read-only inspection remains available with RPC configuration alone
+
+### Requirement: Confirmed deployment registration and source verification
+
+After confirmed successful deployment, the CLI SHALL save the contract's name,
+description, network, and address to `contracts.json` while preserving existing
+entries. It SHALL then submit matching source and build metadata for verification
+on Etherscan or Arbiscan as appropriate, checking the verification result rather
+than treating submission as success. Deployment and verification SHALL be reported
+as separate outcomes. Verification failure SHALL preserve the registered deployment
+and report the address, transaction hash, and error. `make verify` SHALL retry source
+verification for an existing contract without deploying another instance. Failure
+to save the registry after deployment SHALL report the deployed address and hash
+for recovery and SHALL NOT trigger automatic redeployment.
+
+#### Scenario: Deploy and verify successfully
+- **WHEN** deployment is confirmed and source verification succeeds
+- **THEN** the registry contains the new contract alongside all previous entries
+- **AND** the output provides its address, transaction hash, and explorer link
+
+#### Scenario: Deployment fails
+- **WHEN** the deployment transaction fails
+- **THEN** no new contract entry is registered and verification is not attempted
+
+#### Scenario: Verification fails after deployment
+- **WHEN** deployment succeeds but verification fails
+- **THEN** the contract remains registered and the command reports the partial outcome
+- **AND** a later `make verify CONTRACT=<address>` retries only verification
+
+#### Scenario: Registry write fails after deployment
+- **WHEN** the contract is deployed but the registry cannot be saved
+- **THEN** existing registry contents are preserved and the address and transaction
+  hash are reported with a nonzero command outcome
+- **AND** the tool does not automatically send another deployment transaction
+
+### Requirement: Sequential batch distribution and per-contract reporting
+
+`distribute-all` SHALL visit every unique known contract on the selected network
+in registry order, sequentially rather than submitting transactions in parallel.
+It SHALL skip zero USDT balances without sending a transaction and continue after
+individual contract errors. Each submitted transaction SHALL be tracked to its
+outcome before that contract is reported as successful. The command SHALL report
+one outcome per contract, using its name and enough address context to disambiguate
+duplicate names. Statuses SHALL distinguish `OK`, `SKIPPED: empty balance`, and
+`distribution err: <reason>`. Submitted transaction hashes SHALL be available in
+output; missing confirmation SHALL NOT be reported as success. The final exit
+status SHALL be nonzero if any contract failed, and zero if all succeeded or were
+skipped. An empty selection SHALL report that no contracts matched and send nothing.
+Successful transactions for other contracts SHALL NOT be rolled back on a later
+failure. Shared input or network validation errors SHALL fail before the batch.
+
+#### Scenario: Mixed batch outcomes
+- **GIVEN** pool A can distribute, pool B fails, pool C is empty, and pool D can distribute
+- **WHEN** the operator runs `make distribute-all`
+- **THEN** A and D are processed successfully in sequence, B is reported as an error,
+  and C is skipped without a transaction
+- **AND** the final command status is nonzero with a separate outcome for all four pools
+
+#### Scenario: All contracts are empty
+- **WHEN** every selected contract has zero USDT
+- **THEN** every contract is reported as skipped, no transaction is sent, and the
+  command exits successfully
+
+#### Scenario: Other networks are excluded
+- **WHEN** the operator runs `make distribute-all NETWORK=arbitrum`
+- **THEN** no Ethereum registry entry is submitted for distribution
