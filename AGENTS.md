@@ -46,6 +46,11 @@ treat assumptions about these topics as agreed requirements.
 - Record confirmed answers in English and keep open questions visibly unresolved.
   Confirm shared understanding before treating the design as settled.
 
+## Go coding standards
+
+- For Go code changes, follow [Go coding standards](docs/go-coding-standards.md).
+- Use the repository-root `.golangci.yaml` for Go formatting and linting.
+
 ## Implementation
 
 - When implementing an OpenSpec change, use both `openspec-apply-change` and
