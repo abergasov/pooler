@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {USDTRewardDistributor} from "../contracts/USDTRewardDistributor.sol";
 
 interface WithdrawalVm {
+    function expectCall(address callee, bytes calldata data, uint64 count) external;
     function prank(address caller) external;
 }
 
@@ -94,14 +95,13 @@ contract USDTRewardDistributorWithdrawalTest {
     }
 
     function testWithdrawRejectsEmptyBalanceWithoutTokenCall() external {
+        VM.expectCall(address(token), abi.encodeWithSelector(WithdrawalMockUSDT.transfer.selector), 0);
         VM.prank(OWNER);
         try distributor.withdrawUSDT(DESTINATION) {
             revert("empty balance accepted");
         } catch (bytes memory reason) {
             _require(_selector(reason) == USDTRewardDistributor.EmptyBalance.selector, "wrong empty balance error");
         }
-
-        _require(token.transferCalls(DESTINATION) == 0, "token transfer called");
     }
 
     function testWithdrawRejectsNonOwnerWithoutMovingFunds() external {

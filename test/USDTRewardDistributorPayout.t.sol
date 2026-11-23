@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {USDTRewardDistributor} from "../contracts/USDTRewardDistributor.sol";
 
 interface PayoutVm {
+    function expectCall(address callee, bytes calldata data, uint64 count) external;
     function prank(address caller) external;
 }
 
@@ -176,14 +177,13 @@ contract USDTRewardDistributorPayoutTest {
         BoolMockUSDT token = new BoolMockUSDT();
         USDTRewardDistributor distributor = _deploy(address(token), 500, FEE_WALLET, _threeRecipients());
 
+        VM.expectCall(address(token), abi.encodeWithSelector(BoolMockUSDT.transfer.selector), 0);
         VM.prank(OWNER);
         try distributor.distribute() {
             revert("empty balance accepted");
         } catch (bytes memory reason) {
             _require(_selector(reason) == USDTRewardDistributor.EmptyBalance.selector, "wrong empty balance error");
         }
-
-        _require(token.transferCallCount() == 0, "token transfer called");
     }
 
     function testDistributeRejectsNonOwnerWithoutMovingFunds() external {
