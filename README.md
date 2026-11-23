@@ -17,13 +17,13 @@ xcode-select --install
 
 ```sh
 sudo apt update
-sudo apt install --yes ca-certificates curl git make tar
+sudo apt install --yes ca-certificates curl git jq make tar
 ```
 
 ### Arch Linux
 
 ```sh
-sudo pacman -Syu --needed ca-certificates curl git make tar
+sudo pacman -Syu --needed ca-certificates curl git jq make tar
 ```
 
 Arch does not support partial upgrades; do not replace `-Syu` with `-Sy`.
@@ -38,6 +38,16 @@ forge --version
 ```
 
 Foundry manages Solidity `0.8.28` from [`foundry.toml`](foundry.toml).
+
+Install the Go binding generator, then regenerate bindings after contract changes:
+
+```sh
+go install github.com/ethereum/go-ethereum/cmd/abigen@latest
+make gen
+```
+
+`make gen` requires `jq`; on macOS, install it with `brew install jq`.
+Generated bindings are tested with `abigen 1.17.10`.
 
 Sources: [Foundry installation](https://github.com/foundry-rs/foundryup#usage),
 [Apple Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools),

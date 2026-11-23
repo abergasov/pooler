@@ -402,9 +402,14 @@ registry entries. A successful recipient replacement SHALL be confirmed on-chain
 
 ### Requirement: Network RPC lists and key-free inspection
 
-The CLI SHALL read per-network RPC URL lists from a separate YAML file.
-The `eth` key SHALL identify Ethereum mainnet (chain ID 1), and `arb` SHALL
-identify Arbitrum One (chain ID 42161). The existing `NETWORK=ethereum` and
+The CLI SHALL load one local `config.yml` YAML file. Its `rpc` map SHALL contain
+per-network URL lists; `rpc.eth` identifies Ethereum mainnet (chain ID 1), and
+`rpc.arb` identifies Arbitrum One (chain ID 42161). Its required
+`signing.privateKey` and `explorer.apiKey` values provide transaction signing and
+explorer verification credentials. After valid command flags are parsed, the CLI
+SHALL load and validate this complete configuration once before contract selection
+or command execution. Both RPC lists SHALL contain at least one nonblank endpoint.
+The existing `NETWORK=ethereum` and
 `NETWORK=arbitrum` command values SHALL select those lists respectively, without
 changing canonical network names in the registry. Endpoints from another network
 SHALL NOT be used as fallbacks. The CLI SHALL try endpoints sequentially in YAML
@@ -416,16 +421,16 @@ RPC selection SHALL NOT automatically retry transaction submission when its
 outcome is uncertain. The CLI SHALL retain the transaction hash and report the
 uncertain outcome rather than reporting success or a confirmed revert.
 
-The CLI SHALL support a local `.env` containing the signing private key and
-explorer API key. `.env` SHALL be excluded from Git and a secret-free
-`.env.example` SHALL document those settings. RPC URLs containing credentials
-SHALL receive the same protection against committing or printing secrets.
-Private keys SHALL NOT be stored in the registry, input JSON, RPC YAML, Makefile,
-command arguments, or printed output, including errors. Public inspection SHALL
-NOT require signing or explorer secrets.
+`config.yml` SHALL be excluded from Git and a secret-free `config.example.yml`
+SHALL document its layout. RPC URLs containing credentials SHALL receive the same
+protection against committing or printing secrets. Private keys SHALL NOT be
+stored in the registry, input JSON, Makefile, command arguments, or printed
+output, including errors. Every command, including public inspection and an empty
+batch selection, SHALL fail before selection or execution when configuration is
+missing or incomplete.
 
 #### Scenario: Select the network RPC list
-- **GIVEN** a YAML file contains `eth` and `arb` RPC URL lists
+- **GIVEN** `config.yml` contains `rpc.eth` and `rpc.arb` URL lists
 - **WHEN** the operator selects `NETWORK=arbitrum`
 - **THEN** only the `arb` list is eligible for RPC access
 - **AND** a selected endpoint must report chain ID 42161 before transactions are sent
@@ -448,13 +453,12 @@ NOT require signing or explorer secrets.
 - **AND** it does not automatically submit another transaction through the next RPC
 
 #### Scenario: Mutate using a local signing key
-- **WHEN** an owner operation loads a valid private key from `.env`
+- **WHEN** an owner operation loads a valid private key from `config.yml`
 - **THEN** it uses the derived signer without exposing the key in commands or logs
 
-#### Scenario: Missing signing key
-- **WHEN** a mutation command has no usable signing key
-- **THEN** it fails before broadcasting a transaction
-- **AND** read-only inspection remains available with RPC configuration alone
+#### Scenario: Incomplete startup configuration
+- **WHEN** any required RPC list or credential is absent, or an RPC endpoint is blank
+- **THEN** the CLI fails before contract selection or command execution
 
 ### Requirement: Confirmed deployment registration and source verification
 

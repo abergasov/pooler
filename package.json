@@ -1,0 +1,7 @@
+{
+  "name": "pooler-contract-lint",
+  "private": true,
+  "devDependencies": {
+    "solhint": "6.2.5"
+  }
+}

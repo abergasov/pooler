@@ -10,6 +10,26 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Go and Solidity lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Solidity linter
+        run: npm ci --ignore-scripts
+      - name: Run Go and Solidity linters
+        run: make --keep-going lint
+
   foundry:
     name: Foundry tests
     runs-on: ubuntu-latest
@@ -21,5 +41,10 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1
         with:
           version: v1.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
       - name: Run Foundry tests
         run: make test
+      - name: Run Go tests
+        run: go test ./...

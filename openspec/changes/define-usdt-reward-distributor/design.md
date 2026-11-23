@@ -195,40 +195,47 @@ not a mandatory `pools/` directory or the authority for current configuration.
 Expose contract getters for recipients and shares, owner, fee wallet, fee basis
 points, and token. Read these plus the token balance through RPC using the ABI
 produced by the build. The `show` command must not fetch its ABI from an explorer
-or need an explorer API key. Format shares as decimal percentages for the user,
+or use configured explorer credentials. Format shares as decimal percentages for the user,
 while retaining integer basis points in transaction inputs.
 
-Load network RPC lists from a separate `rpc.yml` file in the Go process:
+After valid command flags are parsed, load and validate the one local
+`config.yml` file once before contract selection or command execution:
 
 ```yaml
-eth:
-  - https://ethereum-rpc-1.example
-  - https://ethereum-rpc-2.example
-arb:
-  - https://arbitrum-rpc-1.example
-  - https://arbitrum-rpc-2.example
+rpc:
+  eth:
+    - https://ethereum-rpc-1.example
+    - https://ethereum-rpc-2.example
+  arb:
+    - https://arbitrum-rpc-1.example
+    - https://arbitrum-rpc-2.example
+signing:
+  privateKey: ""
+explorer:
+  apiKey: ""
 ```
 
-These URLs illustrate the shape only; actual endpoints are supplied by the
-operator. Map canonical `ethereum` to `eth` and `arbitrum` to `arb` at the
-configuration boundary. Keep network identity consistent in registry filtering,
-chain-ID validation, signing, and explorer selection. Try endpoints sequentially
-in YAML order, using bounded request timeouts, and use the first endpoint that
-responds successfully with the expected chain ID. Skip unreachable or wrong-chain
-endpoints; stop searching once a working endpoint is found. If none works, report
-an error without broadcasting. No parallel probing or load balancing is needed.
-This connection selection does not authorize transaction retries: retain the hash
-and report an uncertain outcome if submission or confirmation cannot be established,
-without automatically creating or resubmitting a transaction.
+These URLs illustrate the shape only; actual endpoints and credentials are
+supplied by the operator. `config.example.yml` is the secret-free tracked
+template; `config.yml` is ignored because URLs may contain credentials. Map
+canonical `ethereum` to `eth` and `arbitrum` to `arb` at the configuration
+boundary. Keep network identity consistent in registry filtering, chain-ID
+validation, signing, and explorer selection. Try endpoints sequentially in YAML
+order, using bounded request timeouts, and use the first endpoint that responds
+successfully with the expected chain ID. Skip unreachable or wrong-chain
+endpoints; stop searching once a working endpoint is found. If none works,
+report an error without broadcasting. No parallel probing or load balancing is
+needed. This connection selection does not authorize transaction retries:
+retain the hash and report an uncertain outcome if submission or confirmation
+cannot be established, without automatically creating or resubmitting a
+transaction.
 
-Load `.env` as configuration data, not shell commands, for the signing private
-key and explorer API key. Document those settings in a secret-free `.env.example`.
-Keep the actual `.env` and local `rpc.yml` out of Git and provide a
-`rpc.example.yml` with placeholder URLs during implementation, since provider
-URLs may contain credentials. Do not pass secrets as Make arguments or echo them
-in commands, error messages, or diagnostics. Public reads need only RPC
-configuration; require signing/explorer credentials only for operations that
-use them.
+Load configuration as YAML data, not shell commands. Startup requires both
+`rpc.eth` and `rpc.arb` to contain a nonblank endpoint and requires both
+credential fields, then passes that one configuration to the selected command.
+Do not pass secrets as Make arguments or echo them in commands, error messages,
+or diagnostics. This fail-fast validation also applies to public reads and an
+empty batch selection.
 
 Before an existing-contract mutation, read its owner and compare it with the signer.
 Show the chosen network and contract in output. Validate shared settings before
