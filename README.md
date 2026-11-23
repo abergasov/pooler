@@ -53,8 +53,8 @@ make test
 ```
 
 The default read-only endpoints are
-`https://ethereum-rpc.publicnode.com` and
-`https://arbitrum-one-rpc.publicnode.com`. Supply archive-capable endpoints when
+`https://eth.drpc.org` and
+`https://arbitrum-one.public.blastapi.io`. Supply archive-capable endpoints when
 they cannot serve the pinned blocks; keep credentials out of the Makefile:
 
 ```sh
