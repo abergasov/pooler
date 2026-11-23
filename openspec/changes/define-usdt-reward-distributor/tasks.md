@@ -1,19 +1,19 @@
 # Tasks
 
-These tasks describe future implementation. They remain unchecked because only
-specification and planning work is authorized at this stage.
+These tasks describe approved incremental implementation work. Mark a task
+complete only after its required behavior and verification are complete.
 
 ## 1. Implementation setup
 
-- [ ] 1.1 Set up Foundry/Forge for Solidity builds and tests and Anvil for Go CLI integration tests; pin compatible Foundry, Solidity compiler, and required library versions, verify a clean build, and document reproducible build, test, formatting, and static-check commands.
-- [ ] 1.2 Verify deployed code, six decimals, and transfer behavior for the specified Ethereum mainnet USD₮ and Arbitrum One USD₮0 addresses; retain the authoritative references and test both exact deployments, including Ethereum USD₮ transfers without a Boolean return value.
+- [x] 1.1 Set up Foundry/Forge for Solidity builds and tests and Anvil for Go CLI integration tests; pin compatible Foundry, Solidity compiler, and required library versions, verify a clean build, and document reproducible build, test, formatting, and static-check commands.
+- [x] 1.2 Verify deployed code, six decimals, and transfer behavior for the specified Ethereum mainnet USD₮ and Arbitrum One USD₮0 addresses; retain the authoritative references and test both exact deployments, including Ethereum USD₮ transfers without a Boolean return value.
 
 ## 2. Deployment and configuration
 
-- [ ] 2.1 Implement validated deployment with fixed USDT address and fee rate, explicit initial owner, independent fee wallet, and initial recipient pairs; verify successful deployment and rejection of invalid addresses, fee bounds, and lists.
-- [ ] 2.2 Implement owner-only full-list replacement with 1–100 unique recipients, positive basis-point shares, and an exact 10000 total; verify replacement removes old entries and every invalid update preserves the old configuration.
-- [ ] 2.3 Implement immediate owner transfer and independent fee-wallet update; verify unauthorized calls fail, old ownership loses access immediately, and ownership changes leave the fee wallet and list unchanged.
-- [ ] 2.4 Expose public getters for the complete recipient list, owner, fee wallet, fee rate, and USDT address; verify callers without owner privileges can read initial and updated state without a transaction.
+- [x] 2.1 Implement validated deployment with fixed USDT address and fee rate, explicit initial owner, independent fee wallet, and initial recipient pairs; verify successful deployment and rejection of invalid addresses, fee bounds, and lists.
+- [x] 2.2 Implement owner-only full-list replacement with 1–100 unique recipients, positive basis-point shares, and an exact 10000 total; verify replacement removes old entries and every invalid update preserves the old configuration.
+- [x] 2.3 Implement immediate owner transfer and independent fee-wallet update; verify unauthorized calls fail, old ownership loses access immediately, and ownership changes leave the fee wallet and list unchanged.
+- [x] 2.4 Expose public getters for the complete recipient list, owner, fee wallet, fee rate, and USDT address; verify callers without owner privileges can read initial and updated state without a transaction.
 
 ## 3. Payout operations
 
