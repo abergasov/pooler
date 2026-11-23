@@ -1,0 +1,13 @@
+# Copy to config.yml and replace every placeholder. Pooler reads and validates
+# the complete file once after parsing command flags and before command execution.
+rpc:
+  eth:
+    - https://ethereum-rpc-1.example
+    - https://ethereum-rpc-2.example
+  arb:
+    - https://arbitrum-rpc-1.example
+    - https://arbitrum-rpc-2.example
+signing:
+  privateKey: ""
+explorer:
+  apiKey: ""

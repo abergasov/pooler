@@ -33,11 +33,12 @@ the operator deploy, inspect, and manage multiple independent instances.
   network, and address; keep names independent from contract identity.
 - Use Foundry for contract builds and Solidity tests, and Go for operator and
   auxiliary actions plus CLI integration tests against Anvil.
-- Store per-network RPC URL lists in a separate YAML file with `eth` and `arb` keys.
-  Try endpoints in listed order and use the first working endpoint for the network.
-  Keep signing and explorer secrets in an ignored `.env`, provide secret-free
-  configuration examples, and verify source on the selected network's explorer
-  after deploy.
+- Store per-network RPC URL lists, signing credentials, and explorer credentials
+  in one ignored YAML configuration file, read and validated once after command
+  parsing and before contract selection or execution. The RPC map uses `eth` and
+  `arb` keys; try endpoints in listed order and use the first working endpoint
+  for the network. Provide one secret-free example and verify source on the
+  selected network's explorer after deploy.
 
 ## Capabilities
 
