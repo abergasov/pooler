@@ -17,9 +17,9 @@ complete only after its required behavior and verification are complete.
 
 ## 3. Payout operations
 
-- [ ] 3.1 Implement owner-only `distribute()` using the specified balance-snapshot equations and compatible USDT transfers; verify the exact, fractional-residue, tiny-balance, zero-fee, and empty-balance scenarios, including a fee wallet that is also a recipient.
-- [ ] 3.2 Implement full-balance USDT withdrawal to an owner-selected valid destination without fees or a previous-failure prerequisite; verify zero balance after success, preserved configuration, authorization, invalid destinations, and empty-balance errors.
-- [ ] 3.3 Protect payout and configuration invariants during token interactions; verify participant, fee, and withdrawal failures roll back completely, token-reported failures are not ignored, and nested interactions cannot change allocation or spend twice.
+- [x] 3.1 Implement owner-only `distribute()` using the specified balance-snapshot equations and compatible USDT transfers; verify the exact, fractional-residue, tiny-balance, zero-fee, and empty-balance scenarios, including a fee wallet that is also a recipient.
+- [x] 3.2 Implement full-balance USDT withdrawal to an owner-selected valid destination without fees or a previous-failure prerequisite; verify zero balance after success, preserved configuration, authorization, invalid destinations, and empty-balance errors.
+- [x] 3.3 Protect payout and configuration invariants during token interactions; verify participant, fee, and withdrawal failures roll back completely, token-reported failures are not ignored, and nested interactions cannot change allocation or spend twice.
 
 ## 4. Go operator tooling
 
