@@ -34,7 +34,7 @@ func TestDeployRegistersConfirmedContract(t *testing.T) {
 	address := crypto.CreateAddress(crypto.PubkeyToAddress(key.PublicKey), 0)
 	var receipts atomic.Int32
 	var codeReads atomic.Int32
-	server := httptest.NewServer(deploymentRPC(t, new(atomic.Int32), deploymentRPCOptions{
+	server := httptest.NewServer(deploymentRPC(t, new(atomic.Int32), &deploymentRPCOptions{
 		receipt:         "0x1",
 		code:            "0x6000",
 		contractAddress: address,
@@ -91,7 +91,7 @@ func TestDeployReportsPostSendStatesWithoutRetry(t *testing.T) {
 			t.Chdir(t.TempDir())
 			copyDeploymentInputs(t)
 			var sends atomic.Int32
-			server := httptest.NewServer(deploymentRPC(t, &sends, deploymentRPCOptions{receipt: tc.receipt, code: tc.code, contractAddress: common.Address{1}}))
+			server := httptest.NewServer(deploymentRPC(t, &sends, &deploymentRPCOptions{receipt: tc.receipt, code: tc.code, contractAddress: common.Address{1}}))
 			defer server.Close()
 			network, err := domain.ParseNetwork("arbitrum")
 			require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestDeployRetainsHashWhenBroadcastOutcomeIsUncertain(t *testing.T) {
 	t.Chdir(t.TempDir())
 	copyDeploymentInputs(t)
 	var sends atomic.Int32
-	server := httptest.NewServer(deploymentRPC(t, &sends, deploymentRPCOptions{code: "0x6000", sendError: true}))
+	server := httptest.NewServer(deploymentRPC(t, &sends, &deploymentRPCOptions{code: "0x6000", sendError: true}))
 	defer server.Close()
 	network, err := domain.ParseNetwork("arbitrum")
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestDeployReportsRegistrySaveFailureAfterConfirmation(t *testing.T) {
 	require.NoError(t, err)
 	address := crypto.CreateAddress(crypto.PubkeyToAddress(key.PublicKey), 0)
 	var sends atomic.Int32
-	server := httptest.NewServer(deploymentRPC(t, &sends, deploymentRPCOptions{
+	server := httptest.NewServer(deploymentRPC(t, &sends, &deploymentRPCOptions{
 		receipt:         "0x1",
 		code:            "0x6000",
 		contractAddress: address,
@@ -215,7 +215,7 @@ func explorerResponse(body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
 
-func deploymentRPC(t *testing.T, sends *atomic.Int32, options deploymentRPCOptions) http.Handler {
+func deploymentRPC(t *testing.T, sends *atomic.Int32, options *deploymentRPCOptions) http.Handler {
 	t.Helper()
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		var call struct {

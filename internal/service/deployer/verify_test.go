@@ -118,7 +118,7 @@ func TestVerifyReturnsFailureWhenExplorerRemainsPending(t *testing.T) {
 func TestVerifyTreatsAlreadyVerifiedContractAsSuccess(t *testing.T) {
 	// given
 	var requests atomic.Int32
-	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: roundTripper(func(_ *http.Request) (*http.Response, error) {
 		requests.Add(1)
 		return explorerHTTPResponse(`{"status":"0","result":"Contract source code already verified"}`), nil
 	})}
@@ -143,7 +143,7 @@ func TestVerifyTreatsAlreadyVerifiedContractAsSuccess(t *testing.T) {
 func TestVerifyRejectsWrongChainMetadataBeforeExplorerSubmission(t *testing.T) {
 	// given
 	var requests atomic.Int32
-	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: roundTripper(func(_ *http.Request) (*http.Response, error) {
 		requests.Add(1)
 		return explorerHTTPResponse(`{"status":"1","result":"guid-1"}`), nil
 	})}
