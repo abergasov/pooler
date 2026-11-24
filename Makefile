@@ -46,7 +46,7 @@ lint-go:
 	go tool golangci-lint run ./...
 
 lint-solidity:
-	./node_modules/.bin/solhint --disc --noPoster 'contracts/**/*.sol'
+	./node_modules/.bin/solhint --disc --noPoster --max-warnings 0 'contracts/**/*.sol'
 
 test:
 	@forge test

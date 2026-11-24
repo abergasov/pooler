@@ -31,8 +31,8 @@ make lint
 
 The target runs `go tool golangci-lint run ./...` using `.golangci.yaml`, then
 the locally installed Solhint against `contracts/**/*.sol` using `.solhint.json`.
-Solhint uses the recommended rules: errors fail the command; warnings are reported
-without failing it. Constructor visibility is ignored because Solidity 0.8.28
+Solhint uses the recommended rules: errors and warnings fail the command.
+Constructor visibility is ignored because Solidity 0.8.28
 does not require it. Use `make lint-go` or `make lint-solidity` to run one language.
 CI runs `make --keep-going lint` so both linters report results even if one fails.
 
