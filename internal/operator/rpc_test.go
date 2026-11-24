@@ -74,6 +74,30 @@ func TestSelectRPCSkipsUnreachableAndWrongChainThenStops(t *testing.T) {
 	require.Equal(t, []string{"wrong", "working"}, calls)
 }
 
+func TestSelectRPCSkipsTimedOutEndpoint(t *testing.T) {
+	// given
+	slow := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = writer.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0xa4b1"}`))
+	}))
+	defer slow.Close()
+	var calls []string
+	working := chainIDServer(t, "working", "0xa4b1", &calls)
+	defer working.Close()
+	network, err := internal.ParseNetwork("arbitrum")
+	require.NoError(t, err)
+
+	// when
+	started := time.Now()
+	client, err := utils.SelectRPC(context.Background(), network, []string{slow.URL, working.URL}, 20*time.Millisecond)
+
+	// then
+	require.NoError(t, err)
+	client.Close()
+	require.Less(t, time.Since(started), 100*time.Millisecond)
+	require.Equal(t, []string{"working"}, calls)
+}
+
 func TestSelectRPCRejectsEmptyAndUnusableLists(t *testing.T) {
 	// given
 	network, err := internal.ParseNetwork("arbitrum")
