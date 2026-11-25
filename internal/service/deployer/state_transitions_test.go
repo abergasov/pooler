@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,8 +21,59 @@ import (
 
 	"pooler/internal/config"
 	domain "pooler/internal/entities"
+	"pooler/internal/operator"
 	"pooler/internal/service/deployer"
 )
+
+func TestDeployRegistersConfirmedContract(t *testing.T) {
+	// given
+	t.Chdir(t.TempDir())
+	copyDeploymentInputs(t)
+	key, err := crypto.HexToECDSA("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+	address := crypto.CreateAddress(crypto.PubkeyToAddress(key.PublicKey), 0)
+	var receipts atomic.Int32
+	var codeReads atomic.Int32
+	server := httptest.NewServer(deploymentRPC(t, new(atomic.Int32), &deploymentRPCOptions{
+		receipt:         "0x1",
+		code:            "0x6000",
+		contractAddress: address,
+		receipts:        &receipts,
+		codeReads:       &codeReads,
+	}))
+	defer server.Close()
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = explorerRoundTripper(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "api.etherscan.io" {
+			return previousTransport.RoundTrip(request)
+		}
+		if request.Method == http.MethodPost {
+			return explorerResponse(`{"status":"1","result":"guid-1"}`), nil
+		}
+		return explorerResponse(`{"status":"1","result":"Pass - Verified"}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+	network, err := domain.ParseNetwork("arbitrum")
+	require.NoError(t, err)
+	input := deploymentInput()
+
+	// when
+	result, _, err := deployer.New(deploymentConfiguration(server.URL)).Deploy(context.Background(), network, &input)
+	registered, loadErr := operator.LoadContracts("contracts.json")
+
+	// then
+	require.NoError(t, err)
+	require.Equal(t, int32(1), receipts.Load())
+	require.Equal(t, int32(1), codeReads.Load())
+	require.Equal(t, address.Hex(), result.Address)
+	require.NoError(t, loadErr)
+	require.Equal(t, []domain.Contract{{
+		Name:        input.Name,
+		Description: input.Description,
+		Network:     network.Name,
+		Address:     strings.ToLower(address.Hex()),
+	}}, registered)
+}
 
 func TestDeployReportsPostSendStatesWithoutRetry(t *testing.T) {
 	for _, tc := range []struct {
@@ -38,7 +91,7 @@ func TestDeployReportsPostSendStatesWithoutRetry(t *testing.T) {
 			t.Chdir(t.TempDir())
 			copyDeploymentInputs(t)
 			var sends atomic.Int32
-			server := httptest.NewServer(deploymentRPC(t, &sends, deploymentRPCOptions{receipt: tc.receipt, code: tc.code, contractAddress: common.Address{1}}))
+			server := httptest.NewServer(deploymentRPC(t, &sends, &deploymentRPCOptions{receipt: tc.receipt, code: tc.code, contractAddress: common.Address{1}}))
 			defer server.Close()
 			network, err := domain.ParseNetwork("arbitrum")
 			require.NoError(t, err)
@@ -68,7 +121,7 @@ func TestDeployRetainsHashWhenBroadcastOutcomeIsUncertain(t *testing.T) {
 	t.Chdir(t.TempDir())
 	copyDeploymentInputs(t)
 	var sends atomic.Int32
-	server := httptest.NewServer(deploymentRPC(t, &sends, deploymentRPCOptions{code: "0x6000", sendError: true}))
+	server := httptest.NewServer(deploymentRPC(t, &sends, &deploymentRPCOptions{code: "0x6000", sendError: true}))
 	defer server.Close()
 	network, err := domain.ParseNetwork("arbitrum")
 	require.NoError(t, err)
@@ -95,7 +148,7 @@ func TestDeployReportsRegistrySaveFailureAfterConfirmation(t *testing.T) {
 	require.NoError(t, err)
 	address := crypto.CreateAddress(crypto.PubkeyToAddress(key.PublicKey), 0)
 	var sends atomic.Int32
-	server := httptest.NewServer(deploymentRPC(t, &sends, deploymentRPCOptions{
+	server := httptest.NewServer(deploymentRPC(t, &sends, &deploymentRPCOptions{
 		receipt:         "0x1",
 		code:            "0x6000",
 		contractAddress: address,
@@ -148,9 +201,21 @@ type deploymentRPCOptions struct {
 	contractAddress common.Address
 	sendError       bool
 	afterSend       func()
+	receipts        *atomic.Int32
+	codeReads       *atomic.Int32
 }
 
-func deploymentRPC(t *testing.T, sends *atomic.Int32, options deploymentRPCOptions) http.Handler {
+type explorerRoundTripper func(*http.Request) (*http.Response, error)
+
+func (fn explorerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func explorerResponse(body string) *http.Response {
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+}
+
+func deploymentRPC(t *testing.T, sends *atomic.Int32, options *deploymentRPCOptions) http.Handler {
 	t.Helper()
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		var call struct {
@@ -184,12 +249,18 @@ func deploymentRPC(t *testing.T, sends *atomic.Int32, options deploymentRPCOptio
 				result = "0x" + fmt.Sprintf("%064x", 1)
 			}
 		case "eth_getTransactionReceipt":
+			if options.receipts != nil {
+				options.receipts.Add(1)
+			}
 			if options.receipt == "missing" {
 				result = nil
 			} else {
 				result = map[string]any{"status": options.receipt, "contractAddress": options.contractAddress.Hex(), "blockHash": "0x" + fmt.Sprintf("%064x", 1), "blockNumber": "0x1", "transactionHash": "0x" + fmt.Sprintf("%064x", 1), "transactionIndex": "0x0", "from": common.Address{}.Hex(), "to": nil, "cumulativeGasUsed": "0x1", "gasUsed": "0x1", "logs": []any{}, "logsBloom": "0x" + fmt.Sprintf("%0512d", 0)}
 			}
 		case "eth_getCode":
+			if options.codeReads != nil {
+				options.codeReads.Add(1)
+			}
 			result = options.code
 		}
 		payload := map[string]any{"jsonrpc": "2.0", "id": call.ID}

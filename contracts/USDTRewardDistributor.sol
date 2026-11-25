@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+/// @title ERC-20 balance interface
+/// @author Pooler contributors
+/// @notice Defines the balance query used by the distributor.
 interface IERC20Balance {
+    /// @notice Returns an account's token balance.
+    /// @param account The account to query.
     function balanceOf(address account) external view returns (uint256);
 }
 
-/// @notice Holds the validated, mutable configuration for a USDT reward distributor.
+/// @title USDT reward distributor
+/// @author Pooler contributors
+/// @notice Holds validated, mutable configuration and distributes the contract's USDT balance.
 contract USDTRewardDistributor {
     // Represents 100% in basis points (1 BPS = 0.01%) for validating fees and recipient shares.
     uint256 internal constant BPS_DENOMINATOR = 10_000;
@@ -31,16 +38,22 @@ contract USDTRewardDistributor {
     error RemainingBalance(uint256 balance);
     error ReentrantCall();
 
-    address public immutable usdt;
-    uint16 public immutable feeBps;
+    /// @notice The USDT token distributed by this contract.
+    /// @dev Public getter names are retained for ABI compatibility.
+    address public immutable usdt; // solhint-disable-line immutable-vars-naming
+    /// @notice The fixed distribution fee in basis points.
+    uint16 public immutable feeBps; // solhint-disable-line immutable-vars-naming
+    /// @notice The account authorized to administer the distributor.
     address public owner;
+    /// @notice The account that receives the distribution fee.
     address public feeWallet;
     bool private locked;
 
     Recipient[] internal recipients;
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "only owner");
+        // Preserve the established "only owner" revert payload.
+        require(msg.sender == owner, "only owner"); // solhint-disable-line gas-custom-errors
         _;
     }
 
@@ -70,7 +83,8 @@ contract USDTRewardDistributor {
         if (initialFeeWallet == address(0) || initialFeeWallet == address(this)) {
             revert InvalidFeeWallet(initialFeeWallet);
         }
-        if (initialFeeBps >= BPS_DENOMINATOR) {
+        // Keep the clear 0..9999 BPS boundary.
+        if (initialFeeBps >= BPS_DENOMINATOR) { // solhint-disable-line gas-strict-inequalities
             revert InvalidFeeBps(initialFeeBps);
         }
 
@@ -120,14 +134,19 @@ contract USDTRewardDistributor {
     /// @notice Allows the owner to fully replace all recipients and their shares.
     /// @dev Validates 1..MAX_RECIPIENTS unique addresses, excluding zero and this contract,
     /// with positive shares totaling 10,000 BPS (100%), before overwriting the existing list.
-    function replaceRecipients(Recipient[] memory newRecipients) external onlyOwner nonReentrant {
+    /// @dev Preserves the shared memory validator path.
+    /// @param newRecipients The replacement recipient addresses and shares.
+    function replaceRecipients(Recipient[] memory newRecipients) external onlyOwner nonReentrant { // solhint-disable-line gas-calldata-parameters
         _validateAndStoreRecipients(newRecipients);
     }
 
+    /// @notice Returns every configured recipient and its share.
+    /// @return The configured recipients.
     function getRecipients() external view returns (Recipient[] memory) {
         return recipients;
     }
 
+    /// @notice Distributes the full USDT balance among recipients and the fee wallet.
     function distribute() external onlyOwner nonReentrant {
         uint256 balance = IERC20Balance(usdt).balanceOf(address(this));
         if (balance == 0) {
@@ -159,6 +178,8 @@ contract USDTRewardDistributor {
         }
     }
 
+    /// @notice Withdraws the full USDT balance to a valid destination.
+    /// @param destination The account that receives the USDT balance.
     function withdrawUSDT(address destination) external onlyOwner nonReentrant {
         uint256 balance = IERC20Balance(usdt).balanceOf(address(this));
         if (balance == 0) {
@@ -176,6 +197,8 @@ contract USDTRewardDistributor {
         }
     }
 
+    /// @notice Transfers administrative authority to a valid account.
+    /// @param newOwner The next owner.
     function transferOwnership(address newOwner) external onlyOwner nonReentrant {
         if (newOwner == address(0) || newOwner == address(this)) {
             revert InvalidOwner(newOwner);
@@ -184,6 +207,8 @@ contract USDTRewardDistributor {
         owner = newOwner;
     }
 
+    /// @notice Updates the account that receives the distribution fee.
+    /// @param newFeeWallet The next fee wallet.
     function setFeeWallet(address newFeeWallet) external onlyOwner nonReentrant {
         if (newFeeWallet == address(0) || newFeeWallet == address(this)) {
             revert InvalidFeeWallet(newFeeWallet);
@@ -193,8 +218,9 @@ contract USDTRewardDistributor {
     }
 
     function _transferUSDT(address recipient, uint256 amount) private {
+        // USDT compatibility requires accepting tokens that return no transfer data.
         (bool success, bytes memory returnData) =
-            usdt.call(abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), recipient, amount));
+            usdt.call(abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), recipient, amount)); // solhint-disable-line avoid-low-level-calls
         if (!success || (returnData.length != 0 && (returnData.length != 32 || !abi.decode(returnData, (bool))))) {
             revert TokenTransferFailed(recipient, amount);
         }
