@@ -195,8 +195,11 @@ not a mandatory `pools/` directory or the authority for current configuration.
 Expose contract getters for recipients and shares, owner, fee wallet, fee basis
 points, and token. Read these plus the token balance through RPC using the ABI
 produced by the build. The `show` command must not fetch its ABI from an explorer
-or use configured explorer credentials. Format shares as decimal percentages for the user,
-while retaining integer basis points in transaction inputs.
+or use configured explorer credentials for RPC reads. The signing and explorer
+credential fields are still required by startup validation for every command,
+including `show`; inspection does not sign or send a transaction. Format shares
+as decimal percentages for the user, while retaining integer basis points in
+transaction inputs.
 
 After valid command flags are parsed, load and validate the one local
 `config.yml` file once before contract selection or command execution:

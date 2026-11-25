@@ -291,15 +291,23 @@ transactions; the requirement SHALL be revisited before release.
 The contract SHALL expose public read-only methods returning the complete current
 recipient address/share list, owner, fee wallet, fee rate, and USDT token address.
 The `show` command SHALL read these values and the current USDT balance from the
-selected network, displaying percentages at their agreed precision. Reading SHALL
-NOT require the owner's private key, a transaction, or successful explorer
-verification. Local input files SHALL NOT substitute for current on-chain state.
+selected network, displaying percentages at their agreed precision. The CLI SHALL
+require the complete `config.yml` startup configuration, including
+`signing.privateKey` and `explorer.apiKey`, before running `show`. Inspection SHALL
+NOT sign or send a transaction, require owner authorization, or depend on successful
+explorer verification. Local input files SHALL NOT substitute for current on-chain
+state.
 
 #### Scenario: Inspect a changed contract
 - **GIVEN** the owner changed recipients through a different client
 - **WHEN** an operator runs `make show` for that contract
 - **THEN** the command displays the current on-chain list and configuration
-- **AND** it works without a configured private key or verified explorer source
+- **AND** it requires the complete startup configuration but no transaction or
+  verified explorer source
+
+#### Scenario: Inspection with incomplete startup configuration
+- **WHEN** an operator runs `make show` without a required signing or explorer key
+- **THEN** the CLI rejects the configuration before contract selection or RPC access
 
 ### Requirement: Makefile command interface and defaults
 
@@ -400,7 +408,7 @@ registry entries. A successful recipient replacement SHALL be confirmed on-chain
   the current owner
 - **THEN** no mutation transaction is sent for that contract and a clear error is reported
 
-### Requirement: Network RPC lists and key-free inspection
+### Requirement: Complete startup configuration and network RPC lists
 
 The CLI SHALL load one local `config.yml` YAML file. Its `rpc` map SHALL contain
 per-network URL lists; `rpc.eth` identifies Ethereum mainnet (chain ID 1), and
